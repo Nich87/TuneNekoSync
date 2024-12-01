@@ -2,12 +2,21 @@ import { getSongInfo } from '../Utils/songResolver';
 import { client } from '../index';
 import type { Queue } from './queue';
 import { queueManager } from './queue';
-import { joinVoiceChannel, createAudioPlayer } from '@discordjs/voice';
-import { createAudioResource, StreamType, AudioPlayerStatus, DiscordGatewayAdapterCreator } from '@discordjs/voice';
+import {
+	joinVoiceChannel,
+	createAudioPlayer,
+	StreamType,
+	createAudioResource,
+	AudioPlayerStatus,
+	DiscordGatewayAdapterCreator
+} from '@discordjs/voice';
 import ytdl from '@distube/ytdl-core';
 import { Snowflake, VoiceBasedChannel } from 'discord.js';
+import { Readable } from 'stream';
+import { Innertube } from 'youtubei.js';
 
 export class YTPlayer {
+	public voiceChannel;
 	private connection: import('@discordjs/voice').VoiceConnection;
 	public player: import('@discordjs/voice').AudioPlayer;
 	public serverId: Snowflake;
@@ -17,6 +26,7 @@ export class YTPlayer {
 	public isPlaying: boolean;
 	public resource: import('@discordjs/voice').AudioResource | null;
 	constructor(serverId: Snowflake, voiceChannel: VoiceBasedChannel, messageChannelId: Snowflake) {
+		this.voiceChannel = voiceChannel;
 		this.isPlaying = false;
 		this.serverId = serverId;
 		this.messageChannelId = messageChannelId;
@@ -42,21 +52,39 @@ export class YTPlayer {
 	}
 
 	public play() {
+		const queue = queueManager.getQueue(this.serverId);
+		let stream;
+
 		let agent = undefined;
 		if (client.useProxy) agent = ytdl.createProxyAgent({ uri: client.getURI() });
 
-		const queue = queueManager.getQueue(this.serverId);
-		const stream = ytdl(ytdl.getURLVideoID(queue?.currentSong as string), {
+		stream = ytdl(ytdl.getURLVideoID(queue?.currentSong as string), {
 			agent: agent ?? undefined,
 			filter: (format) => format.audioCodec === 'opus' && format.container === 'webm',
 			quality: 'highest',
 			highWaterMark: 32 * 1024 * 1024
 		});
 
+		stream.on('error', async (e) => {
+			console.error('ytdl Stream Error:', e.message);
+			const innertube = await Innertube.create();
+			console.log('[INFO]' + ytdl.getURLVideoID(queue?.currentSong as string));
+			stream = (await innertube.download(ytdl.getURLVideoID(queue?.currentSong as string), {
+				type: 'audio'
+			})) as unknown as Readable;
+
+			this.resource = createAudioResource(stream, { inlineVolume: true });
+			this.resource.encoder?.setBitrate(this.voiceChannel.bitrate);
+			this.resource.volume?.setVolume(this.volume / 10);
+			this.connection.subscribe(this.player);
+			return this.player.play(this.resource);
+		});
+
 		this.resource = createAudioResource(stream, {
 			inputType: StreamType.WebmOpus,
 			inlineVolume: true
 		});
+		this.resource.encoder?.setBitrate(this.voiceChannel.bitrate);
 		this.resource.volume?.setVolume(this.volume / 10);
 		this.connection.subscribe(this.player);
 		this.player.play(this.resource);

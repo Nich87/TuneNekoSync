@@ -43,7 +43,8 @@
 		"discord.js": "^14.16.3",
 		"dotenv": "^16.4.5",
 		"node-cache": "^5.1.2",
-		"youtube-sr": "^4.3.11"
+		"youtube-sr": "^4.3.11",
+		"youtubei.js": "^11.0.1"
 	},
 	"repository": {
 		"type": "git",
